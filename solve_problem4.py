@@ -1,3 +1,5 @@
+
+
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -90,8 +92,10 @@ class ParticleSwarmOptimizer:
         self.particles = np.random.rand(self.num_particles, self.num_dims) * \
             (self.bounds[:, 1] - self.bounds[:, 0]) + self.bounds[:, 0]
         if initial_guess is not None:
+            # 确保初始猜测在边界内
+            initial_guess = np.clip(initial_guess, self.bounds[:, 0], self.bounds[:, 1])
             self.particles[0] = initial_guess
-            print("成功将问题二的最优解植入为初始粒子之一。")
+            print("成功将启发式初始解植入为初始粒子之一。")
         self.velocities = np.zeros((self.num_particles, self.num_dims))
         self.pbest_positions = self.particles.copy()
         self.pbest_fitness = np.full(self.num_particles, np.inf)
@@ -130,13 +134,21 @@ class ParticleSwarmOptimizer:
         return self.gbest_position, self.gbest_fitness
 
 # ==========================================================
-# 4. 结果处理与保存 (保持不变)
+# 4. 结果处理与保存 - [重大更新]
 # ==========================================================
 def run_detailed_simulation_and_save(params, filename="result2.xlsx"):
+    # [关键更新] 将打印逻辑放在前面，并添加错误处理
+    
     global SIMULATION_DT; SIMULATION_DT = 0.01
     total_duration = -objective_function(params)
     params_per_uav = np.array(params).reshape(3, 4)
-    data = []
+    data_for_df = []
+    
+    print("-" * 60)
+    print("最优策略详细参数:")
+    print(f"  - 总有效遮蔽时长: {total_duration:.4f} 秒")
+    print("-" * 60)
+
     for i in range(3):
         v_u, theta_u, t_drop, delta_t_det = params_per_uav[i]
         uav_name = UAV_NAMES[i]
@@ -145,19 +157,41 @@ def run_detailed_simulation_and_save(params, filename="result2.xlsx"):
         p_drop = p_uav_0 + V_UAV * t_drop
         gravity_effect = np.array([0.0, 0.0, -0.5 * G * delta_t_det**2])
         p_detonation = p_drop + V_UAV * delta_t_det + gravity_effect
-        data.append({
+        
+        # 打印到控制台
+        print(f"  无人机 {uav_name}:")
+        print(f"    - 运动方向: {np.rad2deg(theta_u):.4f} 度")
+        print(f"    - 运动速度: {v_u:.4f} m/s")
+        print(f"    - 投放点 (x,y,z): ({p_drop[0]:.2f}, {p_drop[1]:.2f}, {p_drop[2]:.2f})")
+        print(f"    - 起爆点 (x,y,z): ({p_detonation[0]:.2f}, {p_detonation[1]:.2f}, {p_detonation[2]:.2f})")
+
+        # 准备写入Excel的数据
+        data_for_df.append({
             '无人机编号': uav_name, '无人机运动方向': np.rad2deg(theta_u), '无人机运动速度(m/s)': v_u,
             '烟幕干扰弹投放点的x坐标(m)': p_drop[0], '烟幕干扰弹投放点的y坐标(m)': p_drop[1], '烟幕干扰弹投放点的z坐标(m)': p_drop[2],
             '烟幕干扰弹起爆点的x坐标(m)': p_detonation[0], '烟幕干扰弹起爆点的y坐标(m)': p_detonation[1], '烟幕干扰弹起爆点的z坐标(m)': p_detonation[2],
         })
-    df = pd.DataFrame(data)
-    df['有效干扰时长(s)'] = total_duration
-    print(f"\n结果已成功保存到: {os.path.abspath(filename)}")
-    df.to_excel(filename, index=False, engine='openpyxl')
+    
+    # 尝试写入Excel文件
+    try:
+        df = pd.DataFrame(data_for_df)
+        df['有效干扰时长(s)'] = total_duration
+        df.to_excel(filename, index=False, engine='openpyxl')
+        print("-" * 60)
+        print(f"结果已成功保存到: {os.path.abspath(filename)}")
+    except PermissionError:
+        print("-" * 60)
+        print(f"!!! 文件写入失败: {filename} 可能正被其他程序占用。")
+        print("请关闭Excel后重试。不过，所有结果已打印在上方。")
+    except Exception as e:
+        print("-" * 60)
+        print(f"!!! 文件写入时发生未知错误: {e}")
+
     return total_duration
 
+
 # ==========================================================
-# 5. 主执行流程 - [重大更新]
+# 5. 主执行流程 (保持不变)
 # ==========================================================
 if __name__ == "__main__":
     multiprocessing.freeze_support()
@@ -166,42 +200,28 @@ if __name__ == "__main__":
     print("问题4：开始使用PSO算法寻找3无人机协同最优策略...")
     print("="*60)
     
-    # ------------------------------------------------------------------
-    # [重大更新] 参数微调区域: 在这里显式定义所有12个参数的边界
-    # ------------------------------------------------------------------
-    
-    # FY1 的参数边界
-    v_u1_bounds = (70, 140)              # FY1 速度 (m/s)
-    theta_u1_bounds = (0, 2 * np.pi)     # FY1 方向 (弧度)
-    t_drop1_bounds = (0.5, 25)           # FY1 投放时间 (s)
-    delta_t_det1_bounds = (1.5, 10.0)    # FY1 起爆延迟 (s), 基于 1800m 高度
-
-    # FY2 的参数边界
-    v_u2_bounds = (100, 120)              # FY2 速度 (m/s)114.0295
-    theta_u2_bounds = (0, 2 * np.pi)     # FY2 方向 (弧度)-36.7848
-    t_drop2_bounds = (8, 9.5)           # FY2 投放时间 (s)8.9745
-    delta_t_det2_bounds = (7.5, 8.5)    # FY2 起爆延迟 (s), 基于 1400m 高度8.2510
-
-    # FY3 的参数边界
-    v_u3_bounds = (70, 140)              # FY3 速度 (m/s)140
-    theta_u3_bounds = (0, 2 * np.pi)     # FY3 方向 (弧度)54.5777
-    t_drop3_bounds = (10, 25)           # FY3 投放时间 (s)17.1233
-    delta_t_det3_bounds = (2.5, 5)    # FY3 起爆延迟 (s), 基于 700m 高度5.3930
-    
-    # 将所有边界按顺序组合成最终的12维边界列表
+    # --- 您精心调整的参数边界 ---
+    v_u1_bounds = (120, 140)
+    theta_u1_bounds = (0, (1/18)*np.pi)
+    t_drop1_bounds = (0.1, 2)
+    delta_t_det1_bounds = (0.5, 1)
+    v_u2_bounds = (130, 140)
+    theta_u2_bounds = ((245/180)* np.pi, (255/180)* np.pi)
+    t_drop2_bounds = (2.5, 4.5)
+    delta_t_det2_bounds = (6.5, 8.3)
+    v_u3_bounds = (130, 140)
+    theta_u3_bounds = ((4/9)* np.pi, (7/9)* np.pi)
+    t_drop3_bounds = (16, 24)
+    delta_t_det3_bounds = (3, 8.5)
     bounds_fy1 = [v_u1_bounds, theta_u1_bounds, t_drop1_bounds, delta_t_det1_bounds]
     bounds_fy2 = [v_u2_bounds, theta_u2_bounds, t_drop2_bounds, delta_t_det2_bounds]
     bounds_fy3 = [v_u3_bounds, theta_u3_bounds, t_drop3_bounds, delta_t_det3_bounds]
     bounds = bounds_fy1 + bounds_fy2 + bounds_fy3
-    
     print("已为所有12个参数加载独立的、可微调的边界。")
-    # ------------------------------------------------------------------
 
     # 构建启发式初始解
     q2_v_u, q2_theta_u_deg, q2_t_drop, q2_delta_t_det = 139.9905, 179.6725, 1.4034, 4.4810
     fy1_params = [q2_v_u, np.deg2rad(q2_theta_u_deg), q2_t_drop, q2_delta_t_det]
-    
-    # 随机生成FY2和FY3的参数时，确保使用它们各自的边界
     bounds_for_random = bounds_fy2 + bounds_fy3
     random_params_fy2_fy3 = (np.random.rand(8) * 
                              (np.array(bounds_for_random)[:, 1] - np.array(bounds_for_random)[:, 0]) + 
@@ -212,8 +232,8 @@ if __name__ == "__main__":
     
     pso = ParticleSwarmOptimizer(
         bounds=bounds,
-        num_particles=200, max_iter=50,
-        w=0.95, c1=2.0, c2=1.5,
+        num_particles=300, max_iter=50,
+        w=0.8, c1=2.0, c2=1.5,
         max_stagnation=30,
         initial_guess=initial_guess_particle
     )
@@ -223,11 +243,10 @@ if __name__ == "__main__":
     end_time = time.time()
     
     print(f"\n优化过程完成，总耗时: {end_time - start_time:.2f} 秒")
-    print("-" * 60)
     
     max_duration = -best_fitness
-    print(f"找到的最大有效遮蔽时长: {max_duration:.4f} 秒")
     print("-" * 60)
+    print(f"找到的最大有效遮蔽时长: {max_duration:.4f} 秒")
     
     run_detailed_simulation_and_save(best_params, filename="result2.xlsx")
     print("="*60)
