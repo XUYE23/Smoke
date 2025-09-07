@@ -224,8 +224,8 @@ if __name__ == "__main__":
     pso = ParticleSwarmOptimizer(
         func=objective_function,
         bounds=bounds,
-        num_particles=200, # 8维问题，粒子数可以适当增加
-        max_iter=70,      # 增加迭代次数以获得更好结果
+        num_particles=250, # 8维问题，粒子数可以适当增加
+        max_iter=50,      # 增加迭代次数以获得更好结果
         w=0.8, c1=2.0, c2=1.5
     )
     
